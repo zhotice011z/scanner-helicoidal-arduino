@@ -2,4 +2,6 @@ numpy
 pandas
 matplotlib
 scipy
-serial
+pyserial
+PyQt5
+PyQt5WebEngine

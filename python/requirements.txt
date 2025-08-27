@@ -5,3 +5,4 @@ scipy
 pyserial
 PyQt5
 PyQt5WebEngine
+numpy-stl

@@ -2,14 +2,14 @@
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLabel, QSpinBox, QPushButton, QLineEdit, QProgressBar, QSlider,
-    QFileDialog, QFrame, QPlainTextEdit
+    QFrame, QPlainTextEdit
 )
 from PyQt5.QtCore import Qt, QObject, pyqtSignal
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from logger_setup import logger
 import logging
-import sys
+from mpl_toolkits.mplot3d import Axes3D
 import numpy as np
 
 class QtSignalHandler(logging.Handler, QObject):
@@ -23,7 +23,6 @@ class QtSignalHandler(logging.Handler, QObject):
         msg = self.format(record)
         self.log_signal.emit(msg)
 
-
 class LogViewer(QPlainTextEdit):
     """QPlainTextEdit que recebe mensagens de log."""
     def __init__(self, parent=None):
@@ -36,7 +35,6 @@ class LogViewer(QPlainTextEdit):
         handler.log_signal.connect(self.appendPlainText)
         logger.addHandler(handler)
 
-    
 class Input_SpinBox(QSpinBox):
         """SpinBox que arredonda o valor ao step mais próximo ao perder foco."""
         def __init__(self, min_value=0, max_value=100, step=1, start_value=0, prefix="", suffix="", parent = None):
@@ -69,6 +67,7 @@ class Interface(QMainWindow):
         self.setMinimumSize(800, 600)
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
+        self.vis_2d = False  # começa em 3D
 
         # Layout principal: Config | Visualização | Log
         self.main_layout = QHBoxLayout()
@@ -102,22 +101,43 @@ class Interface(QMainWindow):
             # se não tiver "/", mostra apenas os últimos max_chars
             return "…/" + final
 
+    def lim_plot(self):
+        if hasattr(self, "pontos_reconst"):
+            max_xy = self.pontos_reconst[["X_mm", "Y_mm"]].abs().max().max()
+            self.lim_xy = np.ceil(max_xy / 10) * 10 + 10
+            self.lim_z = np.ceil(self.pontos_reconst["Z_mm"].max() / 10) * 10 + 10
+        else:
+            self.lim_xy = -self.parametros_padrao["dist_max"]//2
+            self.lim_xy = self.parametros_padrao["dist_max"]//2
+            self.lim_z = self.parametros_padrao["altura_max"] + 10
+
     def base_plot_2D(self, title):
         self.ax_2D.set_aspect('equal', 'box')
         self.ax_2D.set_title(title)
         self.ax_2D.set_xlabel("X (mm)")
         self.ax_2D.set_ylabel("Y (mm)")
         
-        if hasattr(self, "pontos_reconst"):
-            max_xy = self.pontos_reconst[["X_mm", "Y_mm"]].abs().max().max()
-            lim_xy = np.ceil(max_xy / 10) * 10 + 10
-            lim_z = np.ceil(self.pontos_reconst["Z_mm"].max() / 10) * 10 + 10
-        else:
-            lim_xy = -self.parametros_padrao["dist_max"]//2
-            lim_xy = self.parametros_padrao["dist_max"]//2
-        self.ax_2D.set_xlim([-lim_xy, lim_xy])
-        self.ax_2D.set_ylim([-lim_xy, lim_xy])
-        self.ax_2D.grid(True)            
+        self.lim_plot()
+        self.ax_2D.set_xlim([-self.lim_xy, self.lim_xy])
+        self.ax_2D.set_ylim([-self.lim_xy, self.lim_xy])
+        self.ax_2D.grid(True)
+        
+    def base_plot_3D(self, title):
+        self.ax_3D.set_title(title)
+        self.ax_3D.set_xlabel("X (mm)")
+        self.ax_3D.set_ylabel("Y (mm)")
+        self.ax_3D.set_zlabel("Z (mm)")
+        
+        self.lim_plot()
+        self.ax_3D.set_xlim([-self.lim_xy, self.lim_xy])
+        self.ax_3D.set_ylim([-self.lim_xy, self.lim_xy])
+        self.ax_3D.set_zlim([0, self.lim_z])
+        self.ax_3D.grid(True)
+    
+    def alternar_2d_3d(self):
+        self.canvas_2D.setVisible(not self.vis_2d)
+        self.canvas_3D.setVisible(self.vis_2d)
+        self.vis_2d = not self.vis_2d
     
     # ===========================
     # Painel de Configurações
@@ -147,19 +167,19 @@ class Interface(QMainWindow):
         form_coleta.addRow("Pontos por camada", self.input_pts_camada)
 
         # Altura da camada
-        self.input_alt_camada = Input_SpinBox(
-            min_value=5,
-            max_value=20,
-            step=5,
+        self.input_alt_camada_coleta = Input_SpinBox(
+            min_value=self.parametros_padrao["altura_camada"],
+            max_value=self.parametros_padrao["altura_camada"]*4,
+            step=self.parametros_padrao["altura_camada"],
             start_value=self.parametros_padrao["altura_camada"],
             suffix=" mm"
         )
-        form_coleta.addRow("Altura da camada", self.input_alt_camada)
+        form_coleta.addRow("Altura da camada", self.input_alt_camada_coleta)
 
         # Altura máxima
         self.input_alt_max = Input_SpinBox(
             min_value=20,
-            max_value=150,
+            max_value=90,
             step=10,
             start_value=self.parametros_padrao["altura_max"],
             suffix=" mm"
@@ -177,11 +197,11 @@ class Interface(QMainWindow):
         self.coleta_layout.addLayout(form_coleta)
 
         # Botões iniciar / parar
-        self.btn_iniciar = QPushButton("Iniciar coleta")
-        self.btn_parar = QPushButton("Parar coleta")
+        self.btn_iniciar_coleta = QPushButton("Iniciar coleta")
+        self.btn_parar_coleta = QPushButton("Parar coleta")
         btn_layout = QHBoxLayout()
-        btn_layout.addWidget(self.btn_iniciar)
-        btn_layout.addWidget(self.btn_parar)
+        btn_layout.addWidget(self.btn_iniciar_coleta)
+        btn_layout.addWidget(self.btn_parar_coleta)
         self.coleta_layout.addLayout(btn_layout)
 
         # Barras de progresso
@@ -223,7 +243,7 @@ class Interface(QMainWindow):
 
         # Alinhamento horizontal
         self.input_alin_hor = Input_SpinBox(
-            min_value=-10,
+            min_value=0,
             max_value=10,
             step=1,
             start_value=self.parametros_padrao["alin_hor"],
@@ -241,6 +261,15 @@ class Interface(QMainWindow):
         )
         form_reconst.addRow("Escala", self.input_escala)
         
+        self.input_alt_camada_reconst = Input_SpinBox(
+            min_value=5,
+            max_value=20,
+            step=5,
+            start_value=self.parametros_padrao["altura_camada"],
+            suffix=" mm"
+        )
+        form_reconst.addRow("Altura da camada", self.input_alt_camada_reconst)
+        
         # Janela de suavização
         self.input_suav = Input_SpinBox(
             min_value=1,
@@ -250,18 +279,12 @@ class Interface(QMainWindow):
             suffix=" pts"
         )
         form_reconst.addRow("Janela suavização", self.input_suav)
-        
-
-        # Barra de progresso atualização
-        self.progress_reconst = QProgressBar()
-        self.progress_reconst.setFormat("Reconstrução: %v/%m")
         self.reconst_layout.addLayout(form_reconst)
-        self.reconst_layout.addWidget(self.progress_reconst)
 
         # Botão export STL
         self.btn_export_stl = QPushButton("Exportar STL")
         self.reconst_layout.addWidget(self.btn_export_stl)
-
+        
         self.config_layout.addWidget(self.reconst_frame)
 
         self.main_layout.addWidget(self.config_frame)
@@ -282,13 +305,27 @@ class Interface(QMainWindow):
         self.slider_camada.setTickInterval(1)
         self.visu_layout.addWidget(self.slider_camada)
         
+        self.btn_2d3d = QPushButton("Alternar 2D/3D")
+        self.btn_2d3d.clicked.connect(self.alternar_2d_3d)
+        self.visu_layout.addWidget(self.btn_2d3d)
+        
         self.figura_2D = Figure(figsize=(5,5))
         self.canvas_2D = FigureCanvas(self.figura_2D)
         self.canvas_2D.setMinimumSize(400, 400)
+        self.canvas_2D.setVisible(self.vis_2d)
         self.ax_2D = self.figura_2D.add_subplot(111)
         self.ax_2D.set_aspect('equal', adjustable='box')
         self.base_plot_2D("Nenhum dado carregado")
         self.visu_layout.addWidget(self.canvas_2D)
+        
+        self.figura_3D = Figure(figsize=(5,5))
+        self.canvas_3D = FigureCanvas(self.figura_3D)
+        self.canvas_3D.setMinimumSize(400, 400)
+        self.canvas_3D.setVisible(not self.vis_2d)
+        self.ax_3D = self.figura_3D.add_subplot(111, projection='3d')
+        self.ax_3D.set_aspect('equal', adjustable='box')
+        self.base_plot_3D("Nenhum dado carregado")
+        self.visu_layout.addWidget(self.canvas_3D)
         
         # Aqui será adicionado o matplotlib canvas ou similar
         self.main_layout.addWidget(self.visu_frame, stretch=2)

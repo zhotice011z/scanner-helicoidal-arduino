@@ -1,7 +1,7 @@
 import numpy as np
 from stl import mesh
-from scipy.spatial import Delaunay
 import pandas as pd
+from logger_setup import logger
 
 def dataframe_para_stl(df, nome_arquivo_saida):
     """
@@ -52,7 +52,6 @@ def dataframe_para_stl(df, nome_arquivo_saida):
 
     # Salva
     stl_mesh.save(nome_arquivo_saida)
-    print(f"✅ STL gerado em: {nome_arquivo_saida}")
 
 if __name__ == "__main__":
     arquivo_csv = "tests/ampulheta/ampulheta_sim_cart.csv"

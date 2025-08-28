@@ -3,20 +3,7 @@ import time
 import csv
 import numpy as np
 import sys
-
-# ==================================================
-# CONFIGURAÇÕES DO SCANNER
-# ==================================================
-
-PORTA_SERIAL = 'COM6'
-BAUDRATE = 115200
-
-PASSOS_POR_VOLTA_COMPLETA = 2048*2
-PONTOS_POR_CAMADA = 2**4
-PASSOS_ENTRE_MEDICOES = PASSOS_POR_VOLTA_COMPLETA // PONTOS_POR_CAMADA
-
-NOME_ARQUIVO_SAIDA = 'medicoes_motor 22_08.csv'
-
+from logger_setup import logger
 
 # ==================================================
 # COMUNICAÇÃO COM ARDUINO
@@ -25,16 +12,27 @@ NOME_ARQUIVO_SAIDA = 'medicoes_motor 22_08.csv'
 def conectar_serial(porta, baudrate):
     try:
         ser = serial.Serial(porta, baudrate, timeout=2)
-        print(f"[OK] Conectado em {porta}")
-        time.sleep(2)  # tempo para inicializar
+        logger.info(f"Conectado em {porta}")
         return ser
     except Exception as e:
-        print(f"[ERRO] Não foi possível abrir {porta}: {e}")
+        logger.error(f"Não foi possível abrir {porta}: {e}")
         sys.exit(1)
+        
+def iniciar_arduino(ser):
+    inicio = time.time()
+    while time.time() - inicio < 10:  # timeout 10s
+        if ser.in_waiting > 0:
+            linha = ser.readline().decode(errors="ignore").strip()
+            if "DONE" in linha:
+                logger.info("Arduino pronto")
+                return
+        time.sleep(0.1)
+    raise TimeoutError("Timeout: Arduino não respondeu a tempo")
+    
 
-
-def girar_motor(ser, motor_id, passos=PASSOS_ENTRE_MEDICOES, timeout=20):
+def girar_motor(ser, motor_id, passos, timeout=20):
     comando = f"{motor_id}:{passos}\n"
+    print(comando)
     ser.write(comando.encode())
     inicio = time.time()
 
@@ -42,7 +40,7 @@ def girar_motor(ser, motor_id, passos=PASSOS_ENTRE_MEDICOES, timeout=20):
         if ser.in_waiting > 0:
             resposta = ser.readline().decode().strip()
             if resposta == f"{motor_id} DONE":
-                print(f"Moto [{motor_id}] girado {passos} passos")
+                print(f"Motor [{motor_id}] girado {passos} passos")
                 return True
             elif resposta.startswith("ERRO"):
                 raise Exception(resposta)
@@ -74,24 +72,24 @@ def medir_distancia(ser, timeout=5):
 # CICLO DE VARREDURA
 # ==================================================
 
-def ciclo_varredura_camada(ser, camada, arquivo_csv, pontos=PONTOS_POR_CAMADA):
+def ciclo_varredura_camada(ser, camada, arquivo_csv, pontos_por_camada, passos_por_volta, camadas, passos_por_camada):
     with open(arquivo_csv, mode='w', newline='') as file:
         writer = csv.writer(file)
         writer.writerow(['Camada', 'Passo', 'Angulo_rad', 'Distancia_mm'])
 
-        print(f"\n[INFO] Camada {camada} iniciada ({pontos} pontos).")
+        logger.info(f"Camada {camada} iniciada - ({pontos_por_camada} pts).")
+        passos_por_ponto = passos_por_volta // pontos_por_camada
 
-        for passo in range(pontos):
-            print(f"\n--- Ponto {passo + 1}/{pontos} ---")
-            girar_motor(ser, 'BASE', PASSOS_ENTRE_MEDICOES)
-            distancia = medir_distancia(ser)
+        for camada in range(camadas):
+            for passo in range(pontos_por_camada):
+                girar_motor(ser, 'BASE', passos_por_ponto)
+                distancia = medir_distancia(ser)
 
-            angulo = 2 * np.pi * passo / pontos
-            writer.writerow([camada, passo, angulo, distancia])
+                angulo = 2 * np.pi * passo / pontos_por_camada
+                writer.writerow([camada, passo, angulo, distancia])
+            girar_motor(ser, 'ELEV', passos_por_camada)
 
-            print(f"Salvo → passo={passo}, dist={distancia}")
-
-    print(f"\n[FIM] Varredura concluída. CSV: {arquivo_csv}")
+    logger.info(f"Varredura concluída. CSV: {arquivo_csv}")
 
 
 # ==================================================
@@ -99,13 +97,19 @@ def ciclo_varredura_camada(ser, camada, arquivo_csv, pontos=PONTOS_POR_CAMADA):
 # ==================================================
 
 if __name__ == "__main__":
-    ser = conectar_serial(PORTA_SERIAL, BAUDRATE)
+    ser = conectar_serial('COM7', 115200)
+    while True:
+        linha = ser.readline().decode(errors="ignore").strip()
+        if linha:
+            print(f"[Arduino] {linha}")
+            if "DONE" in linha: break
 
     try:
-        girar_motor(ser, 'BASE', 256)
-        #ciclo_varredura_camada(ser, camada=1, arquivo_csv=NOME_ARQUIVO_SAIDA)
+        girar_motor(ser, 'ELEV', 4096)
+
     except Exception as e:
         print(f"[ERRO CRÍTICO]: {e}")
+
     finally:
         if ser.is_open:
             ser.close()

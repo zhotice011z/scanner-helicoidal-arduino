@@ -1,5 +1,7 @@
 import logging
 import sys
+import os
+from datetime import datetime
 
 # Cria instância global
 logger = logging.getLogger("app_logger")
@@ -14,7 +16,8 @@ if not logger.handlers:
     console_handler.setFormatter(console_formatter)
 
     # Arquivo handler
-    file_handler = logging.FileHandler("app.log", encoding="utf-8")
+    arquivo_log = f"log/app_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+    file_handler = logging.FileHandler("tests/app.log", encoding="utf-8")
     file_handler.setLevel(logging.DEBUG)
     file_formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
     file_handler.setFormatter(file_formatter)

@@ -24,10 +24,10 @@ parametros_padrao = {
     "dist_min": 20,
     "dist_max": 300,
     "suavizacao": 3,
-    "passos_por_volta": 2048*2,  # passos por volta
+    "passos_por_volta": 2038,  # passos por volta
     "altura_volta": 70, # mm por volta elevação
     "baudrate": 115200,
-    "porta_serial": "COM7"
+    "porta_serial": 7
 }
 
 # elev: uma volta = 70 mm
@@ -37,9 +37,11 @@ class App(Interface):
     def __init__(self, parametros_padrao):
         super().__init__(parametros_padrao)
         self.pontos_reconst = None
+        self.arduino_iniciado = False
         
+        self.btn_conectar_arduino.clicked.connect(self.iniciar_arduino)
         self.btn_select_csv.clicked.connect(self.carregar_csv_reconst)
-        self.btn_iniciar_coleta.clicked.connect(self.coletar_dados)
+        self.btn_iniciar_varredura.clicked.connect(self.iniciar_varredura)
         
         self.input_dist_sens.valueChanged.connect(self.plotar_dados)
         self.input_alin_hor.valueChanged.connect(self.plotar_dados)
@@ -51,48 +53,69 @@ class App(Interface):
         self.btn_export_stl.clicked.connect(self.exportar_stl)
     
     def iniciar_arduino(self):
-        self.ser = conectar_serial(parametros_padrao["porta_serial"], parametros_padrao["baudrate"])
-        iniciar_arduino(self.ser)
+        porta = f"COM{self.input_porta.value()}"
+        try:
+            if not self.arduino_iniciado:
+                try:
+                    self.ser = conectar_serial(porta, self.parametros_padrao["baudrate"])
+                    iniciar_arduino(self.ser)
+                    self.arduino_iniciado = True
+                    logger.info("Arduino iniciado e pronto para varredura.")
+                except Exception as e_inner:
+                    logger.error(f"Falha ao iniciar conexão na porta {porta}: {e_inner}")
+                    self.arduino_iniciado = False
+            else:
+                logger.info("Arduino já está iniciado.")
+        except Exception as e:
+            logger.critical(f"Erro inesperado: {e}")
+            self.arduino_iniciado = False
+        finally:
+            self.btn_iniciar_varredura.setEnabled(self.arduino_iniciado)
+            self.btn_parar_varredura.setEnabled(self.arduino_iniciado)
     
-    
-    def coletar_dados(self):
-        pts_por_camada = self.input_pts_camada.value()
-        altura_camada = self.input_alt_camada_coleta.value()
-        altura_max = self.input_alt_max.value()
-        camadas = altura_max // altura_camada
+    def iniciar_varredura(self):
+        # define as constantes
         passos_por_volta = parametros_padrao["passos_por_volta"]
         altura_volta = parametros_padrao["altura_volta"]
-        passos_por_altura = int(passos_por_volta * (altura_camada / altura_volta))
-    
+        
+        pts_por_camada = self.input_pts_camada.value()
+        altura_camada = self.input_alt_camada_varredura.value()
+        altura_max = self.input_alt_max.value()
+        camadas = np.ceil(altura_max // altura_camada)
+        passos_por_camada = int(passos_por_volta * (altura_camada / altura_volta))
+        
+        passos_por_ponto = passos_por_volta // pts_por_camada
+        angulo = 2 * np.pi * passo / pts_por_camada
+        
+        # define nome do arquivo
         nome_projeto = self.input_nome_projeto.text().strip()
-        if not nome_projeto:
-            nome_projeto = "projeto_sem_nome"
+        if not nome_projeto: nome_projeto = "projeto_sem_nome"
 
+        # cria pasta se não existir
         pasta_base = "tests"
         pasta_destino = os.path.join(pasta_base, nome_projeto)
         os.makedirs(pasta_destino, exist_ok=True)
         arquivo_csv = os.path.join(pasta_destino, f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
 
+        # inicia varredura
         logger.info(f"Iniciando varredura: {arquivo_csv}")
         
         with open(arquivo_csv, mode='w', newline='') as file:
             writer = csv.writer(file)
-            writer.writerow(['Camada', 'Passo', 'Angulo_rad', 'Distancia_mm'])
-
-            logger.info(f"Camada {camada} iniciada - ({pts_por_camada} pts).")
-            passos_por_ponto = passos_por_volta // pts_por_camada
+            writer.writerow(['Camada', 'Ponto', 'Angulo_rad', 'Distancia_mm'])
 
             for camada in range(camadas):
+                logger.info(f"Camada {camada} iniciada - ({pts_por_camada} pts).")
                 for passo in range(pts_por_camada):
-                    girar_motor(self.ser, 'BASE', passos_por_ponto)
                     distancia = medir_distancia(self.ser)
-
-                    angulo = 2 * np.pi * passo / pts_por_camada
+                    girar_motor(self.ser, 'BASE', passos_por_ponto)
                     writer.writerow([camada, passo, angulo, distancia])
-                girar_motor(self.ser, 'ELEV', passos_por_altura)
+                girar_motor(self.ser, 'ELEV', passos_por_camada)
 
+        girar_motor(self.ser, 'ELEV', -camadas*passos_por_camada)  # volta ao início
+        
         logger.info(f"Varredura concluída. CSV: {arquivo_csv}")
-    
+        
     def carregar_csv_reconst(self):
         caminho, _ = QFileDialog.getOpenFileName(
             self,
@@ -107,7 +130,7 @@ class App(Interface):
             
             try:
                 self.dados_reconst = pd.read_csv(self.csv_reconst_path)
-                if not {"Camada","Passo","Angulo_rad","Distancia_mm"}.issubset(self.dados_reconst.columns):
+                if not {"Camada","Ponto","Angulo_rad","Distancia_mm"}.issubset(self.dados_reconst.columns):
                     raise ValueError("CSV não possui colunas corretas")
                 self.dados_reconst = self.dados_reconst.sort_values(by='Camada', ascending=True, inplace=False)
                 self.slider_camada.setMaximum(self.dados_reconst['Camada'].max())
@@ -119,7 +142,7 @@ class App(Interface):
 
     def reconstruir(self):
         # pega valores dos spinboxes atuais
-        altura_inicial = 0  # pode ser um input se quiser depois
+        altura_inicial = 0
         altura_camada = self.input_alt_camada_reconst.value()
         dist_sensor   = self.input_dist_sens.value()
         alin_hor      = self.input_alin_hor.value()
@@ -135,24 +158,24 @@ class App(Interface):
                 alin_horizontal=alin_hor,
                 escala=escala
             )
+            try:
+                self.pontos_reconst = suavizar_pontos(
+                    pontos,
+                    self.input_suav.value()
+                )
+            except Exception as e:
+                logger.error(f"Erro na suavização: {e}")
+                self.pontos_reconst = pontos.copy()
         except Exception as e:
             logger.error(f"Erro na reconstrução: {e}")
-            return
+        finally:
+            self.btn_export_stl.setEnabled(self.pontos_reconst is not None)
         
-        try:
-            self.pontos_reconst = suavizar_pontos(
-                pontos,
-                self.input_suav.value()
-            )
-        except Exception as e:
-            logger.error(f"Erro na suavização: {e}")
-            self.pontos_reconst = pontos.copy()
-            return
-
     def plotar_dados(self):
         """
         Plota a reconstrução no canvas usando os parâmetros atuais.
         """
+        if not hasattr(self, 'dados_reconst'): return
         
         self.reconstruir()
         
@@ -171,7 +194,7 @@ class App(Interface):
         # limpa eixo e plota
         self.ax_2D.clear()
         self.ax_2D.scatter(xs_camada, ys_camada, c='blue', s=10)
-        self.base_plot_2D(f"Camada {camada_idx} - Z={zs_todos[camada_idx]:.1f} mm")
+        self.base_plot_2D(f"Camada {camada_idx} - Z={zs_camada[0]:.1f} mm")
         self.canvas_2D.draw()
         
         self.ax_3D.clear()
@@ -207,11 +230,8 @@ def main():
     janela = App(parametros_padrao)
     janela.show()
     logger.info(f"Aplicação iniciada: {datetime.now().strftime('%d/%m/%Y, %H:%M:%S')}")
-    
-    janela.iniciar_arduino()
-    logger.info("Arduino iniciado e pronto para varredura.")
-    
     return sys.exit(app.exec_())
 
 if __name__ == "__main__":
     main()
+    logger.info(f"Aplicação encerrada: {datetime.now().strftime('%d/%m/%Y, %H:%M:%S')}")

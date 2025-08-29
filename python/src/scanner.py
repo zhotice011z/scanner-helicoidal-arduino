@@ -16,7 +16,6 @@ def conectar_serial(porta, baudrate):
         return ser
     except Exception as e:
         logger.error(f"Não foi possível abrir {porta}: {e}")
-        sys.exit(1)
         
 def iniciar_arduino(ser):
     inicio = time.time()
@@ -75,7 +74,7 @@ def medir_distancia(ser, timeout=5):
 def ciclo_varredura_camada(ser, camada, arquivo_csv, pontos_por_camada, passos_por_volta, camadas, passos_por_camada):
     with open(arquivo_csv, mode='w', newline='') as file:
         writer = csv.writer(file)
-        writer.writerow(['Camada', 'Passo', 'Angulo_rad', 'Distancia_mm'])
+        writer.writerow(['Camada', 'Ponto', 'Angulo_rad', 'Distancia_mm'])
 
         logger.info(f"Camada {camada} iniciada - ({pontos_por_camada} pts).")
         passos_por_ponto = passos_por_volta // pontos_por_camada

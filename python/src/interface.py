@@ -148,15 +148,29 @@ class Interface(QMainWindow):
         self.config_layout = QVBoxLayout()
         self.config_frame.setLayout(self.config_layout)
 
-        # ---------- Coleta ----------
-        self.coleta_frame = QFrame()
-        self.coleta_layout = QVBoxLayout()
-        self.coleta_frame.setLayout(self.coleta_layout)
+        # ---------- varredura ----------
+        self.varredura_frame = QFrame()
+        self.varredura_layout = QVBoxLayout()
+        self.varredura_frame.setLayout(self.varredura_layout)
 
-        self.coleta_layout.addWidget(QLabel("<b>Coleta de Dados</b>"))
+        self.varredura_layout.addWidget(QLabel("<b>Varredura do objeto</b>"))
 
-        form_coleta = QFormLayout()
+        form_varredura = QFormLayout()
 
+        # Conectar arduino
+        self.layout_porta = QHBoxLayout()
+        self.btn_conectar_arduino = QPushButton("Conectar Arduino")
+        self.layout_porta.addWidget(self.btn_conectar_arduino)
+        self.input_porta = Input_SpinBox(
+            min_value=1,
+            max_value=10,
+            step=1,
+            start_value=self.parametros_padrao["porta_serial"],
+            prefix="COM"
+        )
+        self.layout_porta.addWidget(self.input_porta)
+        self.varredura_layout.addLayout(self.layout_porta)
+        
         # Pontos por camada
         self.input_pts_camada = Input_SpinBox(
             min_value=8,
@@ -164,17 +178,17 @@ class Interface(QMainWindow):
             step=8,
             start_value=self.parametros_padrao["pts_camada"],
         )
-        form_coleta.addRow("Pontos por camada", self.input_pts_camada)
+        form_varredura.addRow("Pontos por camada", self.input_pts_camada)
 
         # Altura da camada
-        self.input_alt_camada_coleta = Input_SpinBox(
+        self.input_alt_camada_varredura = Input_SpinBox(
             min_value=self.parametros_padrao["altura_camada"],
             max_value=self.parametros_padrao["altura_camada"]*4,
             step=self.parametros_padrao["altura_camada"],
             start_value=self.parametros_padrao["altura_camada"],
             suffix=" mm"
         )
-        form_coleta.addRow("Altura da camada", self.input_alt_camada_coleta)
+        form_varredura.addRow("Altura da camada", self.input_alt_camada_varredura)
 
         # Altura máxima
         self.input_alt_max = Input_SpinBox(
@@ -184,37 +198,39 @@ class Interface(QMainWindow):
             start_value=self.parametros_padrao["altura_max"],
             suffix=" mm"
         )
-        form_coleta.addRow("Altura máxima", self.input_alt_max)
+        form_varredura.addRow("Altura máxima", self.input_alt_max)
 
         # Nome do projeto / pasta
         self.input_nome_projeto = QLineEdit()
-        form_coleta.addRow("Nome do projeto", self.input_nome_projeto)
+        form_varredura.addRow("Nome do projeto", self.input_nome_projeto)
 
         # Botão selecionar pasta
         self.btn_select_pasta = QPushButton("Selecionar pasta")
-        form_coleta.addRow("Pasta de salvamento", self.btn_select_pasta)
+        form_varredura.addRow("Pasta de salvamento", self.btn_select_pasta)
 
-        self.coleta_layout.addLayout(form_coleta)
+        self.varredura_layout.addLayout(form_varredura)
 
         # Botões iniciar / parar
-        self.btn_iniciar_coleta = QPushButton("Iniciar coleta")
-        self.btn_parar_coleta = QPushButton("Parar coleta")
+        self.btn_iniciar_varredura = QPushButton("Iniciar varredura")
+        self.btn_parar_varredura = QPushButton("Parar varredura")
+        self.btn_iniciar_varredura.setEnabled(False)
+        self.btn_parar_varredura.setEnabled(False)
         btn_layout = QHBoxLayout()
-        btn_layout.addWidget(self.btn_iniciar_coleta)
-        btn_layout.addWidget(self.btn_parar_coleta)
-        self.coleta_layout.addLayout(btn_layout)
+        btn_layout.addWidget(self.btn_iniciar_varredura)
+        btn_layout.addWidget(self.btn_parar_varredura)
+        self.varredura_layout.addLayout(btn_layout)
 
         # Barras de progresso
         self.progress_pts = QProgressBar()
         self.progress_pts.setFormat("Pontos: %v/%m")
-        self.coleta_layout.addWidget(self.progress_pts)
+        self.varredura_layout.addWidget(self.progress_pts)
 
          # Barra de progresso camadas
         self.progress_camadas = QProgressBar()
         self.progress_camadas.setFormat("Camadas: %v/%m")
-        self.coleta_layout.addWidget(self.progress_camadas)
+        self.varredura_layout.addWidget(self.progress_camadas)
 
-        self.config_layout.addWidget(self.coleta_frame)
+        self.config_layout.addWidget(self.varredura_frame)
 
         # ---------- Reconstrução ----------
         self.reconst_frame = QFrame()
@@ -283,6 +299,7 @@ class Interface(QMainWindow):
 
         # Botão export STL
         self.btn_export_stl = QPushButton("Exportar STL")
+        self.btn_export_stl.setEnabled(False)
         self.reconst_layout.addWidget(self.btn_export_stl)
         
         self.config_layout.addWidget(self.reconst_frame)
